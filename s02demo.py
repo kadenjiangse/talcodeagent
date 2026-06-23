@@ -164,9 +164,11 @@ def run_glob(pattern: str) -> str:
     except Exception as e:
         return f"Error: {e}"
 
-# 测试工具可用性
-# outputs = run_bash('pwd')
-# print(f"output; {outputs}")
+# 定义字符串到函数的映射map TOOL_HANDLERS
+TOOL_HANDLERS = {
+    "bash": run_bash, "read_file": run_read, "write_file": run_write,
+    "edit_file": run_edit, "glob": run_glob,
+}
 
 ## Agent loop
 def agent_loop(messages: list):
@@ -182,8 +184,9 @@ def agent_loop(messages: list):
         for block in response.content:
             # 执行所有的tool_use，并保存结果
             if block.type == 'tool_use':
-                # 执行bash脚本并保存
-                output = run_bash(block.input['command'])
+                print(f"\033[33m> {block.name}\033[0m")
+                handler = TOOL_HANDLERS.get(block.name)
+                output = handler(**block.input) if handler else f"Unkown: {block.name}"
                 print(f"工具执行结果：{output}")
                 # 保存到results中
                 results.append({
@@ -197,25 +200,28 @@ def agent_loop(messages: list):
 
 # 从终端读取输入
 if __name__ == "__main__":
-    # print("s01: 智能体循环")
-    # print("输入问题，回车发送。输入q退出. \n")
+    print("s02: 在s01 基础上加了4个工具")
+    print("输入问题，回车发送。输入q退出. \n")
     
-    # history = []
-    # while True:
-    #     try: 
-    #         query = input("\033[36ms01 >> \033[0m") # 从终端读取用户输入，\033代表ESC，代表ANSI终端控制码的开头，[36m代表设置终端内字符为青色，[0m
-    #     except (EOFError, KeyboardInterrupt):
-    #         break
-    #     if query.strip().lower() in ("q", "exit", ""):
-    #         break
-    #     history.append({"role": "user", "content": query})
-    #     agent_loop(history)
-    #     # 打印模型最后一次回复的内容
-    #     response_content = history[-1]["content"]
-    #     if isinstance(response_content, list):
-    #         for block in response_content:
-    #             if getattr(block, 'type', None) == 'text':
-    #                 print(block.text)
+    history = []
+    while True:
+        try: 
+            query = input("\033[36ms01 >> \033[0m") # 从终端读取用户输入，\033代表ESC，代表ANSI终端控制码的开头，[36m代表设置终端内字符为青色，[0m
+        except (EOFError, KeyboardInterrupt):
+            break
+        if query.strip().lower() in ("q", "exit", ""):
+            break
+        history.append({"role": "user", "content": query})
+        agent_loop(history)
+        # 打印模型最后一次回复的内容
+        response_content = history[-1]["content"]
+        if isinstance(response_content, list):
+            for block in response_content:
+                if getattr(block, 'type', None) == 'text':
+                    print(block.text)
 
-    #     print()
-    print(run_edit('hello.py', '你就是个大聪明', 'import torch\n print(torch.cuda.is_avaliable)'))
+        print()
+    # print(run_edit('hello.py', '你就是个大聪明', 'import torch\n print(torch.cuda.is_avaliable)')) 工具测试
+    # 测试工具可用性
+    # outputs = run_bash('pwd')
+    # print(f"output; {outputs}")
