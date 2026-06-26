@@ -7,6 +7,7 @@ import json, ast
 from quopri import decodestring
 import subprocess
 from pathlib import Path
+import yaml
 
 from pydantic.type_adapter import P  # 启动子进程，执行系统命令
 
@@ -30,13 +31,63 @@ if os.getenv("ANTHROPIC_BASE_URL"):
     os.environ.pop("ANTHROPIC_AUTH_TOKEN", None)
 
 WORKDIR = Path.cwd()
+SKILLS_DIR = WORKDIR / "skills"
 # 创建一个client，用于向LLM发送请求
 client = Anthropic(base_url=os.getenv('ANTHROPIC_BASE_URL'))
 # 读取模型名称
 MODEL = os.environ["MODEL_ID"]
 CURRENT_TODOS: list[dict] = []
-# 定义系统提示词，增加了任务规划的能力
-SYSTEM = f"你是一个位于{WORKDIR}的代码智能体。对于复杂的子问题，使用task tool去创建一个子智能体。"
+
+
+# skill目录浏览
+def _parse_frontmatter(text: str) -> tuple[dict, str]:
+    """将SKILL.md解析为YAML格式，返回(meta, body)"""
+    if not text.startswith("---"):
+        return {}, text
+    parts = text.split("---", 2)
+    if len(parts) < 3:
+        return {}, text
+    try:
+        meta = yaml.safe_load(parts[1]) or {}
+    except yaml.YAMLError:
+        meta = {}
+    return meta, parts[2].strip()
+
+# skill字典，skill name到skill原数据dict的 map
+SKILL_REGISTRY: dict[str, dict] = {}
+def _scan_skills():
+    f"""处理skills/ 目录，将每个skill转换为name, description, content的对象，保存到全局的skill字典当中"""
+    if not SKILLS_DIR.exists():
+        return 
+    for d in sorted(SKILLS_DIR.iterdir()):
+        if not d.is_dir():
+            continue
+        manifest = d / "SKILL.md"
+        if manifest.exists():
+            raw = manifest.read_text()
+            meta, body = _parse_frontmatter(raw) # 正文内容没用到
+            name = meta.get("name", d.name)
+            desc = meta.get("description", raw.split("\n")[0].lstrip("#").strip())
+            SKILL_REGISTRY[name] = {"name": name, "description": desc, "content": raw}
+
+_scan_skills()
+
+def list_skills() -> str:
+    """列出所有的skill name + description"""
+    if not SKILL_REGISTRY:
+        return "(no skills found)"
+    return "\n".join(f"- **{s['name']}**: {s['description']}" for s in SKILL_REGISTRY.values())
+
+def build_system() -> str:
+    """生成系统提示词"""
+    catalog = list_skills()
+    return (
+        f"你是一个位于{WORKDIR}的代码智能体。"
+        f"可用的技能: \n{catalog}\n"
+        "需要用skill的时候，使用load_skill去获取完整的细节"
+    )
+# 定义系统提示词
+SYSTEM = build_system()
 
 # 定义子Agent的系统提示词，不带任务规划的tool，防止无限递归
 SUB_SYSTEM = (
@@ -124,6 +175,15 @@ TOOLS = [
                 }
             },
             "required": ["todos"]
+        }
+    },
+    {
+        "name": "load_skill",
+        "description": "通过名称加载完整的skill内容",
+        "input_schema": {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"]
         }
     }
 ]
@@ -283,11 +343,19 @@ def run_todo_write(todos: list) -> str:
         lines.append(f" [{icon}] {t['content']}")
     print("\n".join(lines))
     return f"Updated {len(CURRENT_TODOS)} tasks"
-  
+
+def load_skill(name: str) -> str:
+    """加载完整的skill内容。通过注册表查询，无需遍历路径"""
+    skill = SKILL_REGISTRY.get(name)
+    if not skill:
+        return f"Skill not found: {name}"
+    return skill["content"]
+
 # 定义字符串到函数的映射map TOOL_HANDLERS
 TOOL_HANDLERS = {
     "bash": run_bash, "read_file": run_read, "write_file": run_write,
     "edit_file": run_edit, "glob": run_glob, "todo_write": run_todo_write,
+    "load_skill":load_skill,
 }
 # 定义子Agent 工具名称到工具函数的映射map，SUB_HANDLERS
 SUB_HANDLERS = {
@@ -483,7 +551,7 @@ def agent_loop(messages: list):
 
 # 从终端读取输入
 if __name__ == "__main__":
-    print("s06: subagent - 带有干净上下文的子agent，仅仅返回总结")
+    print("s07: Skill加载 - 在系统提示词中加入skill的大纲，具体skill内容按需加载")
     print("输入问题，回车发送。输入q退出. \n")
     
     history = []
