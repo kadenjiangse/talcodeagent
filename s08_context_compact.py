@@ -3,7 +3,7 @@
 """
 
 import os # 提供系统环境变量，目录，文件的查改能力
-import json, ast
+import json, ast, time
 from quopri import decodestring
 import subprocess
 from pathlib import Path
@@ -553,7 +553,7 @@ def summarize_history(messages):
 
 # 压缩上下文
 def compact_history(messages):
-    transript_path = write_transcript(messages)
+    transcript_path = write_transcript(messages)
     print(f"[transcript saved: {transcript_path}]")
     summary = summarize_history(messages)
     return [{"role": "user", "content": f"[Compacted]\n\n{summary}"}]
